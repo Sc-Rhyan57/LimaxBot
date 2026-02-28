@@ -75,11 +75,16 @@ jobs:
 
           find app/src/main/jniLibs -name "*.so"
 
-      - name: Instalar node_modules do bot
+      - name: Instalar e zipar node_modules do bot
         run: |
           cd nodejs-assets/nodejs-project
           npm install --production
           echo "node_modules instalados: $(ls node_modules | wc -l) pacotes"
+          zip -r node_modules.zip node_modules/
+          mkdir -p ../../app/src/main/assets
+          mv node_modules.zip ../../app/src/main/assets/node_modules.zip
+          echo "ZIP gerado: $(du -sh ../../app/src/main/assets/node_modules.zip | cut -f1)"
+          rm -rf node_modules
 
       - name: Tornar gradlew executável
         run: chmod +x gradlew

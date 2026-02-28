@@ -17,4 +17,3 @@ dependencyResolutionManagement {
 
 rootProject.name = "LimaxBot"
 include(":app")
-include(":nodejs-mobile-module")

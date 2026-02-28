@@ -10,13 +10,14 @@ const {
 
 const P = require('pino');
 const { Boom } = require('@hapi/boom');
-const { WebSocketServer } = require('ws');
 const fs = require('fs');
 const path = require('path');
+const readline = require('readline');
 
-const rn = require('rn-bridge');
+// Comunicação via stdin/stdout (sem rn-bridge)
+const rl = readline.createInterface({ input: process.stdin, terminal: false });
 
-const DATA_DIR = rn.app.datadir();
+const DATA_DIR = process.env.HOME || '/data/data/com.limaxbot/files';
 const AUTH_DIR = path.join(DATA_DIR, 'auth_limax');
 const MEDIA_DIR = path.join(DATA_DIR, 'media');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
@@ -45,11 +46,14 @@ let deletedMessages = loadJson(DELETED_LOG, []);
 let sock = null;
 let isConnected = false;
 
+// Enviar mensagem para o Android via stdout (uma linha JSON por mensagem)
 function send(type, data) {
-    rn.channel.send(JSON.stringify({ type, data, ts: Date.now() }));
+    const msg = JSON.stringify({ type, data, ts: Date.now() });
+    process.stdout.write(msg + '\n');
 }
 
-rn.channel.on('message', async (raw) => {
+// Receber mensagens do Android via stdin
+rl.on('line', async (raw) => {
     try {
         const { action, payload } = JSON.parse(raw);
         switch (action) {

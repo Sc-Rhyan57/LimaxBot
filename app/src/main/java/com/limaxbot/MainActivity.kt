@@ -87,6 +87,7 @@ fun LimaxApp(vm: BotViewModel) {
         NavItem("Apagadas", Icons.Outlined.DeleteSweep),
         NavItem("Contatos", Icons.Outlined.People),
         NavItem("Config", Icons.Outlined.Settings),
+        NavItem("Console", Icons.Outlined.Terminal),
     )
 
     Scaffold(
@@ -107,9 +108,22 @@ fun LimaxApp(vm: BotViewModel) {
             Column {
                 NavigationBar(containerColor = LC.Surface, tonalElevation = 0.dp) {
                     tabs.forEachIndexed { i, item ->
+                        // Badge de log count na aba Console
+                        val badge = if (i == 5 && state.logLines.isNotEmpty()) state.logLines.size else 0
                         NavigationBarItem(
-                            selected = tab == i, onClick = { tab = i },
-                            icon = { Icon(item.icon, item.label, modifier = Modifier.size(22.dp)) },
+                            selected = tab == i,
+                            onClick = { tab = i },
+                            icon = {
+                                BadgedBox(badge = {
+                                    if (badge > 0 && tab != 5) {
+                                        Badge(containerColor = LC.Error) {
+                                            Text(if (badge > 99) "99+" else "$badge", fontSize = 7.sp)
+                                        }
+                                    }
+                                }) {
+                                    Icon(item.icon, item.label, modifier = Modifier.size(22.dp))
+                                }
+                            },
                             label = { Text(item.label, fontSize = 9.sp, fontWeight = if (tab == i) FontWeight.Bold else FontWeight.Normal) },
                             colors = NavigationBarItemDefaults.colors(
                                 selectedIconColor = LC.Green, selectedTextColor = LC.Green,
@@ -131,6 +145,7 @@ fun LimaxApp(vm: BotViewModel) {
                     2 -> DeletedScreen(vm)
                     3 -> ContactsScreen(vm)
                     4 -> SettingsScreen(vm)
+                    5 -> ConsoleScreen(vm)
                 }
             }
         }

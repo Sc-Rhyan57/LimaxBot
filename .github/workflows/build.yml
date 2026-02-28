@@ -33,11 +33,28 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Setup Android NDK
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r26d
-          link-to-sdk: true
+      - name: Instalar nodejs-mobile-react-native e extrair libnode.so
+        run: |
+          npm install nodejs-mobile-react-native@0.18.0
+          echo "=== Conteúdo do pacote nodejs-mobile-react-native ==="
+          find node_modules/nodejs-mobile-react-native -maxdepth 3 | head -40
+
+          # Copiar libnode.so para o módulo local (usado no build)
+          JNI_SRC=$(find node_modules/nodejs-mobile-react-native -type d -name "jniLibs" | head -1)
+          if [ -n "$JNI_SRC" ]; then
+            echo "Copiando jniLibs de: $JNI_SRC"
+            cp -r "$JNI_SRC/." nodejs-mobile-module/src/main/jniLibs/
+          else
+            echo "ERRO: jniLibs não encontrada no pacote npm!"
+            find node_modules/nodejs-mobile-react-native -name "*.so" | head -10
+            exit 1
+          fi
+
+          # Também copiar para app (caso jniLibs esteja direto no app)
+          mkdir -p app/src/main/jniLibs
+          cp -r nodejs-mobile-module/src/main/jniLibs/. app/src/main/jniLibs/
+          echo "libnode.so(s) disponíveis:"
+          find nodejs-mobile-module/src/main/jniLibs -name "*.so"
 
       - name: Instalar dependências do bot
         run: |
@@ -49,6 +66,19 @@ jobs:
 
       - name: Tornar gradlew executável
         run: chmod +x gradlew
+
+      - name: Baixar gradle-wrapper.jar (se ausente)
+        run: |
+          JAR="gradle/wrapper/gradle-wrapper.jar"
+          if [ ! -f "$JAR" ]; then
+            echo "Baixando gradle-wrapper.jar..."
+            mkdir -p gradle/wrapper
+            GRADLE_VERSION=$(grep distributionUrl gradle/wrapper/gradle-wrapper.properties | sed 's/.*gradle-\(.*\)-bin.zip/\1/')
+            curl -fL "https://github.com/gradle/gradle/raw/v${GRADLE_VERSION}/gradle/wrapper/gradle-wrapper.jar" -o "$JAR" 2>/dev/null || \
+            (curl -fL "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" -o /tmp/g.zip && \
+             python3 -c "import zipfile,shutil; z=zipfile.ZipFile('/tmp/g.zip'); [shutil.copyfileobj(z.open(n),open('$JAR','wb')) for n in z.namelist() if n.endswith('gradle-wrapper.jar')]")
+            ls -lh "$JAR"
+          fi
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -66,7 +96,6 @@ jobs:
       - name: Build APK
         run: ./gradlew :app:assemble${{ inputs.buildType == 'release' && 'Release' || 'Debug' }}
         env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 

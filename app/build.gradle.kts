@@ -66,6 +66,7 @@ android {
     sourceSets {
         getByName("main") {
             assets.srcDirs("src/main/assets", "../../nodejs-assets")
+            jniLibs.srcDirs("src/main/jniLibs")
         }
     }
 }
@@ -89,7 +90,6 @@ dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("io.coil-kt:coil-compose:2.6.0")
 
-    implementation("com.janeasystems:nodejs-mobile-react-native:0.18.0") {
-        exclude(group = "com.facebook.react")
-    }
+    // Módulo local que encapsula nodejs-mobile (libnode.so copiada pelo CI)
+    implementation(project(":nodejs-mobile-module"))
 }

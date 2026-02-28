@@ -90,6 +90,6 @@ dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("io.coil-kt:coil-compose:2.6.0")
 
-    // Módulo local que encapsula nodejs-mobile (libnode.so copiada pelo CI)
+    // nodejs-mobile como módulo local (libnode.so injetada pelo CI via npm)
     implementation(project(":nodejs-mobile-module"))
 }

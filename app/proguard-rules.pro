@@ -1,0 +1,3 @@
+-keep class com.limaxbot.model.** { *; }
+-keep class com.janeasystems.** { *; }
+-dontwarn com.janeasystems.**

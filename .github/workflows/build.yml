@@ -3,24 +3,20 @@ name: Build LimaxBot APK
 on:
   workflow_dispatch:
     inputs:
-      buildType:
-        description: 'Build Type'
+      build_type:
+        description: 'Tipo de build'
         required: true
         default: 'debug'
         type: choice
-        options:
-          - debug
-          - release
-
-permissions:
-  contents: write
+        options: [debug, release]
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -28,65 +24,10 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - name: Setup Node.js 20
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
-
-      - name: Baixar binário node para cada ABI e colocar em assets
-        run: |
-          npm install nodejs-mobile-react-native@18.20.4
-
-          PKG="node_modules/nodejs-mobile-react-native/android"
-
-          echo "=== Binários disponíveis no pacote ==="
-          find "$PKG" -name "node" -o -name "libnode.so" | head -20
-
-          # O pacote tem o binário 'node' em android/libnode/bin/<abi>/libnode.so
-          # que na verdade É o executável node renomeado para .so para o Android carregar
-          # Vamos colocá-lo como assets/bin/<abi>/node
-
-          mkdir -p app/src/main/assets/bin
-
-          for ABI in armeabi-v7a arm64-v8a x86 x86_64; do
-            SRC="$PKG/libnode/bin/$ABI/libnode.so"
-            if [ -f "$SRC" ]; then
-              mkdir -p app/src/main/assets/bin/$ABI
-              cp "$SRC" app/src/main/assets/bin/$ABI/node
-              echo "OK: assets/bin/$ABI/node ($(du -h "$SRC" | cut -f1))"
-            fi
-          done
-
-          echo "=== Assets/bin ==="
-          find app/src/main/assets/bin -type f
-
-      - name: Instalar dependências do bot
-        run: |
-          cd nodejs-assets/nodejs-project
-          npm install --omit=dev
-          echo "Pacotes instalados: $(ls node_modules | wc -l)"
-
-      - uses: gradle/actions/setup-gradle@v3
-
-      - name: Tornar gradlew executável
-        run: chmod +x gradlew
-
-      - name: Baixar gradle-wrapper.jar (se ausente)
-        run: |
-          JAR="gradle/wrapper/gradle-wrapper.jar"
-          if [ ! -f "$JAR" ]; then
-            mkdir -p gradle/wrapper
-            GRADLE_VERSION=$(grep distributionUrl gradle/wrapper/gradle-wrapper.properties | sed 's/.*gradle-\(.*\)-bin.zip/\1/')
-            curl -fsSL "https://github.com/gradle/gradle/raw/v${GRADLE_VERSION}/gradle/wrapper/gradle-wrapper.jar" -o "$JAR" 2>/dev/null || \
-            (curl -fsSL "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" -o /tmp/g.zip && \
-              python3 -c "
-          import zipfile,sys
-          with zipfile.ZipFile('/tmp/g.zip') as z:
-            n=[x for x in z.namelist() if x.endswith('gradle-wrapper.jar')]
-            open('$JAR','wb').write(z.open(n[0]).read()) if n else sys.exit(1)
-          ")
-            ls -lh "$JAR"
-          fi
+          node-version: '18'
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -94,34 +35,100 @@ jobs:
           path: |
             ~/.gradle/caches
             ~/.gradle/wrapper
-          key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
-          restore-keys: gradle-
+          key: gradle-${{ hashFiles('**/*.gradle.kts') }}
 
-      - name: Decode Keystore
-        if: inputs.buildType == 'release'
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/keystore.jks
+      # ── Baixar nodejs-mobile-react-native para extrair libnode.so ──────────────
+      # O binário Node.js vem como libnode.so dentro do pacote npm.
+      # Precisamos colocá-lo em jniLibs/<abi>/libnode.so para que o Android
+      # o instale em nativeLibraryDir — único diretório executável (W^X policy).
+      - name: Extrair libnode.so do npm para jniLibs
+        run: |
+          npm pack nodejs-mobile-react-native@18.20.4
+          mkdir -p npm_extract
+          tar -xzf nodejs-mobile-react-native-*.tgz -C npm_extract
 
-      - name: Build APK
-        run: ./gradlew :app:assemble${{ inputs.buildType == 'release' && 'Release' || 'Debug' }}
+          echo "Conteúdo do pacote npm:"
+          find npm_extract -name "*.so" | head -20
+          find npm_extract -name "libnode*" | head -20
+
+          # Mapear ABIs npm → Android
+          declare -A ABI_MAP=(
+            ["arm64-v8a"]="arm64-v8a"
+            ["armeabi-v7a"]="armeabi-v7a"
+            ["x86"]="x86"
+            ["x86_64"]="x86_64"
+          )
+
+          for abi in "${!ABI_MAP[@]}"; do
+            android_abi="${ABI_MAP[$abi]}"
+            dest="app/src/main/jniLibs/$android_abi"
+            mkdir -p "$dest"
+
+            # O libnode.so real fica em android/libnode/bin/<abi>/libnode.so
+            src="npm_extract/package/android/libnode/bin/$abi/libnode.so"
+            if [ -f "$src" ]; then
+              cp "$src" "$dest/libnode.so"
+              echo "✅ $abi → $dest/libnode.so ($(du -sh $dest/libnode.so | cut -f1))"
+            else
+              echo "⚠️  $abi não encontrado em $src"
+              find npm_extract -path "*/$abi*" -name "*.so" 2>/dev/null | head -5
+            fi
+          done
+
+          echo "jniLibs gerado:"
+          find app/src/main/jniLibs -name "*.so"
+
+      # ── Instalar dependências do bot ───────────────────────────────────────────
+      - name: Instalar node_modules do bot
+        run: |
+          cd nodejs-assets/nodejs-project
+          npm install --production
+          echo "node_modules instalados: $(ls node_modules | wc -l) pacotes"
+
+      # ── Keystore (só para release) ─────────────────────────────────────────────
+      - name: Decodificar keystore
+        if: ${{ github.event.inputs.build_type == 'release' }}
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
+
+      # ── Build ──────────────────────────────────────────────────────────────────
+      - name: Build Debug
+        if: ${{ github.event.inputs.build_type == 'debug' }}
+        run: ./gradlew assembleDebug --no-daemon
+
+      - name: Build Release
+        if: ${{ github.event.inputs.build_type == 'release' }}
         env:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          STORE_FILE: ${{ github.workspace }}/keystore.jks
+        run: ./gradlew assembleRelease --no-daemon
+
+      # ── Upload APK ─────────────────────────────────────────────────────────────
+      - name: Encontrar APK
+        id: apk
+        run: |
+          APK=$(find app/build/outputs/apk -name "*.apk" | head -1)
+          echo "path=$APK" >> $GITHUB_OUTPUT
+          echo "APK: $APK"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LimaxBot-${{ inputs.buildType }}
-          path: app/build/outputs/apk/**/*.apk
-          retention-days: 30
+          name: LimaxBot-${{ github.event.inputs.build_type }}-${{ github.run_number }}
+          path: ${{ steps.apk.outputs.path }}
 
+      # ── Release automática ─────────────────────────────────────────────────────
       - name: Criar Release
-        if: inputs.buildType == 'release'
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v2.0.${{ github.run_number }}
-          name: LimaxBot v2.0.${{ github.run_number }}
-          files: app/build/outputs/apk/release/*.apk
-          draft: false
-          prerelease: false
+          name: "LimaxBot v2.0.${{ github.run_number }} (${{ github.event.inputs.build_type }})"
+          files: ${{ steps.apk.outputs.path }}
+          body: |
+            Build automático via GitHub Actions
+            Tipo: ${{ github.event.inputs.build_type }}
+            Run: #${{ github.run_number }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

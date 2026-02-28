@@ -5,7 +5,7 @@ import android.util.Log
 
 class RNNodeJsMobile(private val context: Context) {
 
-    val channel = NodeJsChannel()
+    val channel = NodeChannel()
 
     companion object {
         private const val TAG = "NodeJsMobile"
@@ -13,7 +13,7 @@ class RNNodeJsMobile(private val context: Context) {
         init {
             try {
                 System.loadLibrary("node")
-                Log.d(TAG, "libnode.so carregada com sucesso")
+                Log.d(TAG, "libnode.so carregada")
             } catch (e: UnsatisfiedLinkError) {
                 Log.e(TAG, "Falha ao carregar libnode.so: ${e.message}")
             }
@@ -21,29 +21,19 @@ class RNNodeJsMobile(private val context: Context) {
     }
 
     fun startNodeWithArguments(arguments: Array<String>) {
+        val dataDir = context.filesDir.absolutePath
         Thread {
             try {
-                startNodeJsWithArguments(arguments, getNodePath())
+                nativeStartNode(arguments, dataDir)
             } catch (e: Exception) {
                 Log.e(TAG, "Erro ao iniciar Node.js: ${e.message}")
             }
         }.apply {
             name = "NodeJsThread"
+            isDaemon = true
             start()
         }
     }
 
-    private fun getNodePath(): String {
-        return context.filesDir.absolutePath
-    }
-
-    private external fun startNodeJsWithArguments(arguments: Array<String>, nodePath: String)
-}
-
-// Serviço de foreground exigido pelo Manifest
-class RNNodeJsMobileService : android.app.Service() {
-    override fun onBind(intent: android.content.Intent?) = null
-    override fun onStartCommand(intent: android.content.Intent?, flags: Int, startId: Int): Int {
-        return START_NOT_STICKY
-    }
+    private external fun nativeStartNode(arguments: Array<String>, dataDir: String)
 }

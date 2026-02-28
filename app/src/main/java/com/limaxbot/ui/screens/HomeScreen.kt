@@ -32,6 +32,14 @@ fun HomeScreen(vm: BotViewModel) {
     val state by vm.state.collectAsState()
     var phone by remember(state.settings.phoneNumber) { mutableStateOf(state.settings.phoneNumber) }
 
+    // Detectar se o binário node foi encontrado (após nodeReady, se nenhum log de OK apareceu é problema)
+    val nodeHasBinary = state.logLines.any {
+        it.contains("Binário extraído", true) || it.contains("Processo Node.js iniciado", true)
+    }
+    val nodeFailed = state.nodeReady && state.logLines.any {
+        it.contains("Binário node NÃO encontrado", true) || it.contains("Falha ao iniciar", true)
+    }
+
     LazyColumn(
         modifier = Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(LC.Bg, Color(0xFF0D1A0E)))),
         contentPadding = PaddingValues(16.dp),
@@ -56,15 +64,43 @@ fun HomeScreen(vm: BotViewModel) {
 
         item { StatusCard(state.status, state.connectedAt, state.mediaList.size, state.deletedList.size, state.nodeReady) }
 
+        // Banner de status do Node.js
         item {
-            AnimatedVisibility(visible = !state.nodeReady, enter = fadeIn(), exit = fadeOut()) {
-                Row(
-                    Modifier.fillMaxWidth().background(LC.Warning.copy(0.08f), RoundedCornerShape(10.dp))
-                        .border(1.dp, LC.Warning.copy(0.3f), RoundedCornerShape(10.dp)).padding(12.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically
-                ) {
-                    CircularProgressIndicator(modifier = Modifier.size(16.dp), color = LC.Warning, strokeWidth = 2.dp)
-                    Text("Iniciando engine Node.js...", color = LC.Warning, fontSize = 12.sp)
+            AnimatedContent(targetState = Triple(state.nodeReady, nodeHasBinary, nodeFailed)) { (ready, hasBinary, failed) ->
+                when {
+                    // Ainda carregando
+                    !ready -> NodeStatusBanner(
+                        icon = Icons.Outlined.HourglassBottom,
+                        message = "Iniciando engine Node.js...",
+                        sub = "Aguarde alguns segundos",
+                        color = LC.Warning,
+                        loading = true
+                    )
+                    // Pronto mas binário não encontrado
+                    failed -> NodeStatusBanner(
+                        icon = Icons.Outlined.ErrorOutline,
+                        message = "Binário Node.js não encontrado",
+                        sub = "Veja o Console para detalhes. O APK pode precisar ser recompilado.",
+                        color = LC.Error,
+                        loading = false
+                    )
+                    // Pronto e funcionando
+                    hasBinary -> NodeStatusBanner(
+                        icon = Icons.Outlined.CheckCircle,
+                        message = "Engine Node.js pronta",
+                        sub = "Processo rodando normalmente",
+                        color = LC.Green,
+                        loading = false
+                    )
+                    // Pronto mas sem confirmar binário ainda (pode ser que ainda não logou)
+                    ready -> NodeStatusBanner(
+                        icon = Icons.Outlined.Info,
+                        message = "Engine iniciada",
+                        sub = "Verifique o Console para detalhes",
+                        color = LC.Info,
+                        loading = false
+                    )
+                    else -> {}
                 }
             }
         }
@@ -102,6 +138,29 @@ fun HomeScreen(vm: BotViewModel) {
         }
 
         item { Spacer(Modifier.height(80.dp)) }
+    }
+}
+
+@Composable
+fun NodeStatusBanner(icon: ImageVector, message: String, sub: String, color: Color, loading: Boolean) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .background(color.copy(0.08f), RoundedCornerShape(10.dp))
+            .border(1.dp, color.copy(0.3f), RoundedCornerShape(10.dp))
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        if (loading) {
+            CircularProgressIndicator(modifier = Modifier.size(16.dp), color = color, strokeWidth = 2.dp)
+        } else {
+            Icon(icon, null, tint = color, modifier = Modifier.size(16.dp))
+        }
+        Column {
+            Text(message, color = color, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+            Text(sub, color = color.copy(0.7f), fontSize = 10.sp)
+        }
     }
 }
 

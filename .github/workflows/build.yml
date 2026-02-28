@@ -33,32 +33,32 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Setup Android NDK
-        uses: nttld/setup-ndk@v1
-        with:
-          ndk-version: r26d
-          link-to-sdk: true
-
-      - name: Instalar nodejs-mobile-react-native e extrair libnode.so
+      - name: Baixar binário node para cada ABI e colocar em assets
         run: |
           npm install nodejs-mobile-react-native@18.20.4
 
-          # Caminho real confirmado pelo log: android/libnode/bin/<abi>/libnode.so
-          LIBNODE_DIR="node_modules/nodejs-mobile-react-native/android/libnode/bin"
+          PKG="node_modules/nodejs-mobile-react-native/android"
+
+          echo "=== Binários disponíveis no pacote ==="
+          find "$PKG" -name "node" -o -name "libnode.so" | head -20
+
+          # O pacote tem o binário 'node' em android/libnode/bin/<abi>/libnode.so
+          # que na verdade É o executável node renomeado para .so para o Android carregar
+          # Vamos colocá-lo como assets/bin/<abi>/node
+
+          mkdir -p app/src/main/assets/bin
 
           for ABI in armeabi-v7a arm64-v8a x86 x86_64; do
-            SRC="$LIBNODE_DIR/$ABI/libnode.so"
+            SRC="$PKG/libnode/bin/$ABI/libnode.so"
             if [ -f "$SRC" ]; then
-              mkdir -p nodejs-mobile-module/src/main/jniLibs/$ABI
-              mkdir -p app/src/main/jniLibs/$ABI
-              cp "$SRC" nodejs-mobile-module/src/main/jniLibs/$ABI/libnode.so
-              cp "$SRC" app/src/main/jniLibs/$ABI/libnode.so
-              echo "Copiado: $ABI/libnode.so"
+              mkdir -p app/src/main/assets/bin/$ABI
+              cp "$SRC" app/src/main/assets/bin/$ABI/node
+              echo "OK: assets/bin/$ABI/node ($(du -h "$SRC" | cut -f1))"
             fi
           done
 
-          echo "=== jniLibs prontos ==="
-          find app/src/main/jniLibs -name "*.so"
+          echo "=== Assets/bin ==="
+          find app/src/main/assets/bin -type f
 
       - name: Instalar dependências do bot
         run: |
@@ -75,31 +75,17 @@ jobs:
         run: |
           JAR="gradle/wrapper/gradle-wrapper.jar"
           if [ ! -f "$JAR" ]; then
-            echo "gradle-wrapper.jar não encontrado, baixando..."
             mkdir -p gradle/wrapper
-            GRADLE_VERSION=$(grep distributionUrl gradle/wrapper/gradle-wrapper.properties \
-              | sed 's/.*gradle-\(.*\)-bin.zip/\1/')
-            echo "Versão do Gradle: $GRADLE_VERSION"
-            curl -fsSL \
-              "https://github.com/gradle/gradle/raw/v${GRADLE_VERSION}/gradle/wrapper/gradle-wrapper.jar" \
-              -o "$JAR" || \
-            (curl -fsSL \
-              "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
-              -o /tmp/g.zip && \
+            GRADLE_VERSION=$(grep distributionUrl gradle/wrapper/gradle-wrapper.properties | sed 's/.*gradle-\(.*\)-bin.zip/\1/')
+            curl -fsSL "https://github.com/gradle/gradle/raw/v${GRADLE_VERSION}/gradle/wrapper/gradle-wrapper.jar" -o "$JAR" 2>/dev/null || \
+            (curl -fsSL "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" -o /tmp/g.zip && \
               python3 -c "
-          import zipfile, sys
+          import zipfile,sys
           with zipfile.ZipFile('/tmp/g.zip') as z:
-              names = [n for n in z.namelist() if n.endswith('gradle-wrapper.jar')]
-              if names:
-                  with z.open(names[0]) as src, open('$JAR','wb') as dst:
-                      dst.write(src.read())
-                  print('Extraído:', names[0])
-              else:
-                  sys.exit(1)
+            n=[x for x in z.namelist() if x.endswith('gradle-wrapper.jar')]
+            open('$JAR','wb').write(z.open(n[0]).read()) if n else sys.exit(1)
           ")
             ls -lh "$JAR"
-          else
-            echo "gradle-wrapper.jar já presente"
           fi
 
       - name: Cache Gradle

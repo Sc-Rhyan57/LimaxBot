@@ -1,0 +1,74 @@
+name: Build LimaxBot APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Android NDK (para módulos nativos do nodejs-mobile)
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+          link-to-sdk: true
+
+      - name: Instalar dependências do bot (node_modules que vão dentro do APK)
+        run: |
+          cd nodejs-assets/nodejs-project
+          npm install --omit=dev
+          echo "node_modules instalados: $(ls node_modules | wc -l) pacotes"
+
+      - name: Tornar gradlew executável
+        run: chmod +x gradlew
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
+          restore-keys: gradle-
+
+      - name: Build APK Debug
+        run: ./gradlew assembleDebug
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+
+      - name: Upload APK como Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: LimaxBot-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30
+
+      - name: Criar Release com o APK
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v2.0.${{ github.run_number }}
+          name: LimaxBot v2.0.${{ github.run_number }}
+          files: app/build/outputs/apk/debug/app-debug.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

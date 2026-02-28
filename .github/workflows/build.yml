@@ -3,12 +3,17 @@ name: Build LimaxBot APK
 on:
   workflow_dispatch:
     inputs:
-      build_type:
+      buildType:
         description: 'Tipo de build'
         required: true
         default: 'debug'
         type: choice
-        options: [debug, release]
+        options:
+          - debug
+          - release
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -37,21 +42,15 @@ jobs:
             ~/.gradle/wrapper
           key: gradle-${{ hashFiles('**/*.gradle.kts') }}
 
-      # ── Baixar nodejs-mobile-react-native para extrair libnode.so ──────────────
-      # O binário Node.js vem como libnode.so dentro do pacote npm.
-      # Precisamos colocá-lo em jniLibs/<abi>/libnode.so para que o Android
-      # o instale em nativeLibraryDir — único diretório executável (W^X policy).
       - name: Extrair libnode.so do npm para jniLibs
         run: |
           npm pack nodejs-mobile-react-native@18.20.4
           mkdir -p npm_extract
           tar -xzf nodejs-mobile-react-native-*.tgz -C npm_extract
 
-          echo "Conteúdo do pacote npm:"
           find npm_extract -name "*.so" | head -20
           find npm_extract -name "libnode*" | head -20
 
-          # Mapear ABIs npm → Android
           declare -A ABI_MAP=(
             ["arm64-v8a"]="arm64-v8a"
             ["armeabi-v7a"]="armeabi-v7a"
@@ -64,40 +63,38 @@ jobs:
             dest="app/src/main/jniLibs/$android_abi"
             mkdir -p "$dest"
 
-            # O libnode.so real fica em android/libnode/bin/<abi>/libnode.so
             src="npm_extract/package/android/libnode/bin/$abi/libnode.so"
             if [ -f "$src" ]; then
               cp "$src" "$dest/libnode.so"
-              echo "✅ $abi → $dest/libnode.so ($(du -sh $dest/libnode.so | cut -f1))"
+              echo "OK: $abi -> $dest/libnode.so ($(du -sh $dest/libnode.so | cut -f1))"
             else
-              echo "⚠️  $abi não encontrado em $src"
+              echo "AVISO: $abi nao encontrado em $src"
               find npm_extract -path "*/$abi*" -name "*.so" 2>/dev/null | head -5
             fi
           done
 
-          echo "jniLibs gerado:"
           find app/src/main/jniLibs -name "*.so"
 
-      # ── Instalar dependências do bot ───────────────────────────────────────────
       - name: Instalar node_modules do bot
         run: |
           cd nodejs-assets/nodejs-project
           npm install --production
           echo "node_modules instalados: $(ls node_modules | wc -l) pacotes"
 
-      # ── Keystore (só para release) ─────────────────────────────────────────────
+      - name: Tornar gradlew executável
+        run: chmod +x gradlew
+
       - name: Decodificar keystore
-        if: ${{ github.event.inputs.build_type == 'release' }}
+        if: ${{ github.event.inputs.buildType == 'release' }}
         run: |
           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
 
-      # ── Build ──────────────────────────────────────────────────────────────────
       - name: Build Debug
-        if: ${{ github.event.inputs.build_type == 'debug' }}
+        if: ${{ github.event.inputs.buildType == 'debug' }}
         run: ./gradlew assembleDebug --no-daemon
 
       - name: Build Release
-        if: ${{ github.event.inputs.build_type == 'release' }}
+        if: ${{ github.event.inputs.buildType == 'release' }}
         env:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
@@ -105,7 +102,6 @@ jobs:
           STORE_FILE: ${{ github.workspace }}/keystore.jks
         run: ./gradlew assembleRelease --no-daemon
 
-      # ── Upload APK ─────────────────────────────────────────────────────────────
       - name: Encontrar APK
         id: apk
         run: |
@@ -116,19 +112,18 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LimaxBot-${{ github.event.inputs.build_type }}-${{ github.run_number }}
+          name: LimaxBot-${{ github.event.inputs.buildType }}-${{ github.run_number }}
           path: ${{ steps.apk.outputs.path }}
 
-      # ── Release automática ─────────────────────────────────────────────────────
       - name: Criar Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v2.0.${{ github.run_number }}
-          name: "LimaxBot v2.0.${{ github.run_number }} (${{ github.event.inputs.build_type }})"
+          name: "LimaxBot v2.0.${{ github.run_number }} (${{ github.event.inputs.buildType }})"
           files: ${{ steps.apk.outputs.path }}
           body: |
-            Build automático via GitHub Actions
-            Tipo: ${{ github.event.inputs.build_type }}
+            Build automatico via GitHub Actions
+            Tipo: ${{ github.event.inputs.buildType }}
             Run: #${{ github.run_number }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

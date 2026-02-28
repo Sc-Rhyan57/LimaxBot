@@ -84,11 +84,12 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
 
         when (type) {
             "state" -> {
-                val connected = data?.asJsonObject?.get("connected")?.asBoolean ?: false
+                val dataObj = data?.asJsonObject
+                val connected = dataObj?.get("connected")?.asBoolean ?: false
                 _state.update { it.copy(status = if (connected) BotStatus.CONNECTED else BotStatus.IDLE) }
                 if (connected) {
-                    val ml = gson.fromJson(data?.asJsonObject?.get("media"), Array<MediaEntry>::class.java)?.toList() ?: emptyList()
-                    val dl = gson.fromJson(data?.asJsonObject?.get("deleted"), Array<DeletedEntry>::class.java)?.toList() ?: emptyList()
+                    val ml = gson.fromJson(dataObj?.get("media"), Array<MediaEntry>::class.java)?.toList() ?: emptyList()
+                    val dl = gson.fromJson(dataObj?.get("deleted"), Array<DeletedEntry>::class.java)?.toList() ?: emptyList()
                     _state.update { it.copy(mediaList = ml, deletedList = dl) }
                 }
             }
@@ -96,10 +97,11 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
                 _state.update { it.copy(pairingCode = data?.asJsonObject?.get("code")?.asString, status = BotStatus.CONNECTING) }
             }
             "connection" -> {
-                val status = data?.asJsonObject?.get("status")?.asString
+                val dataObj = data?.asJsonObject
+                val status = dataObj?.get("status")?.asString
                 when (status) {
                     "connected" -> {
-                        val at = data?.asJsonObject?.get("connectedAt")?.asLong
+                        val at = dataObj.get("connectedAt")?.asLong
                         _state.update { it.copy(status = BotStatus.CONNECTED, pairingCode = null, connectedAt = at) }
                         BotNotificationService.notifyConnected(ctx)
                         BotNotificationService.start(ctx)
@@ -107,7 +109,7 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
                         NodeBridge.send("get_deleted")
                     }
                     "disconnected" -> {
-                        val reason = data?.asJsonObject?.get("reason")?.asString ?: "Desconectado"
+                        val reason = dataObj?.get("reason")?.asString ?: "Desconectado"
                         _state.update { it.copy(status = BotStatus.IDLE, pairingCode = null) }
                         BotNotificationService.notifyDisconnected(ctx, reason)
                         BotNotificationService.stop(ctx)

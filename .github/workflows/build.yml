@@ -33,34 +33,38 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Setup Android NDK
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r26d
+          link-to-sdk: true
+
       - name: Instalar nodejs-mobile-react-native e extrair libnode.so
         run: |
-          npm install nodejs-mobile-react-native@0.18.0
-          echo "=== Conteúdo do pacote nodejs-mobile-react-native ==="
-          find node_modules/nodejs-mobile-react-native -maxdepth 3 | head -40
+          # versão real disponível no npm (0.18.0 não existe)
+          npm install nodejs-mobile-react-native@18.20.4
 
-          # Copiar libnode.so para o módulo local (usado no build)
+          echo "=== Procurando jniLibs no pacote ==="
           JNI_SRC=$(find node_modules/nodejs-mobile-react-native -type d -name "jniLibs" | head -1)
+
           if [ -n "$JNI_SRC" ]; then
-            echo "Copiando jniLibs de: $JNI_SRC"
+            echo "Encontrado em: $JNI_SRC"
+            mkdir -p nodejs-mobile-module/src/main/jniLibs
             cp -r "$JNI_SRC/." nodejs-mobile-module/src/main/jniLibs/
+            cp -r "$JNI_SRC/." app/src/main/jniLibs/
+            echo "SOs copiados:"
+            find nodejs-mobile-module/src/main/jniLibs -name "*.so"
           else
-            echo "ERRO: jniLibs não encontrada no pacote npm!"
-            find node_modules/nodejs-mobile-react-native -name "*.so" | head -10
+            echo "ERRO: jniLibs não encontrada!"
+            find node_modules/nodejs-mobile-react-native -name "*.so" | head -20
             exit 1
           fi
-
-          # Também copiar para app (caso jniLibs esteja direto no app)
-          mkdir -p app/src/main/jniLibs
-          cp -r nodejs-mobile-module/src/main/jniLibs/. app/src/main/jniLibs/
-          echo "libnode.so(s) disponíveis:"
-          find nodejs-mobile-module/src/main/jniLibs -name "*.so"
 
       - name: Instalar dependências do bot
         run: |
           cd nodejs-assets/nodejs-project
           npm install --omit=dev
-          echo "node_modules instalados: $(ls node_modules | wc -l) pacotes"
+          echo "Pacotes instalados: $(ls node_modules | wc -l)"
 
       - uses: gradle/actions/setup-gradle@v3
 
@@ -71,13 +75,31 @@ jobs:
         run: |
           JAR="gradle/wrapper/gradle-wrapper.jar"
           if [ ! -f "$JAR" ]; then
-            echo "Baixando gradle-wrapper.jar..."
+            echo "gradle-wrapper.jar não encontrado, baixando..."
             mkdir -p gradle/wrapper
-            GRADLE_VERSION=$(grep distributionUrl gradle/wrapper/gradle-wrapper.properties | sed 's/.*gradle-\(.*\)-bin.zip/\1/')
-            curl -fL "https://github.com/gradle/gradle/raw/v${GRADLE_VERSION}/gradle/wrapper/gradle-wrapper.jar" -o "$JAR" 2>/dev/null || \
-            (curl -fL "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" -o /tmp/g.zip && \
-             python3 -c "import zipfile,shutil; z=zipfile.ZipFile('/tmp/g.zip'); [shutil.copyfileobj(z.open(n),open('$JAR','wb')) for n in z.namelist() if n.endswith('gradle-wrapper.jar')]")
+            GRADLE_VERSION=$(grep distributionUrl gradle/wrapper/gradle-wrapper.properties \
+              | sed 's/.*gradle-\(.*\)-bin.zip/\1/')
+            echo "Versão do Gradle: $GRADLE_VERSION"
+            curl -fsSL \
+              "https://github.com/gradle/gradle/raw/v${GRADLE_VERSION}/gradle/wrapper/gradle-wrapper.jar" \
+              -o "$JAR" || \
+            (curl -fsSL \
+              "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
+              -o /tmp/g.zip && \
+              python3 -c "
+          import zipfile, sys
+          with zipfile.ZipFile('/tmp/g.zip') as z:
+              names = [n for n in z.namelist() if n.endswith('gradle-wrapper.jar')]
+              if names:
+                  with z.open(names[0]) as src, open('$JAR','wb') as dst:
+                      dst.write(src.read())
+                  print('Extraído:', names[0])
+              else:
+                  sys.exit(1)
+          ")
             ls -lh "$JAR"
+          else
+            echo "gradle-wrapper.jar já presente"
           fi
 
       - name: Cache Gradle

@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
 import com.google.gson.JsonObject
 import com.limaxbot.model.*
+import com.limaxbot.service.AppLogger
 import com.limaxbot.service.BotNotificationService
 import com.limaxbot.service.NodeBridge
 import kotlinx.coroutines.delay
@@ -36,6 +37,7 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
         NodeBridge.init(ctx)
         observeNode()
         observeNodeReady()
+        observeLogs()
     }
 
     private suspend fun loadPrefs() {
@@ -61,8 +63,17 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun observeNode() {
         viewModelScope.launch {
-            NodeBridge.messages.collect { json ->
-                handleNodeMessage(json)
+            NodeBridge.messages.collect { json -> handleNodeMessage(json) }
+        }
+    }
+
+    private fun observeLogs() {
+        viewModelScope.launch {
+            AppLogger.logs.collect { line ->
+                _state.update { s ->
+                    val updated = (s.logLines + line).takeLast(500)
+                    s.copy(logLines = updated)
+                }
             }
         }
     }
@@ -143,9 +154,7 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun connectBot(phone: String) {
-        viewModelScope.launch {
-            ctx.dataStore.edit { it[KEY_PHONE] = phone }
-        }
+        viewModelScope.launch { ctx.dataStore.edit { it[KEY_PHONE] = phone } }
         _state.update { it.copy(status = BotStatus.CONNECTING, error = null) }
         NodeBridge.send("start_bot", mapOf("phoneNumber" to phone))
     }
@@ -177,6 +186,7 @@ class BotViewModel(app: Application) : AndroidViewModel(app) {
         NodeBridge.send("get_contact_info", mapOf("number" to number))
     }
 
+    fun clearLogs() = _state.update { it.copy(logLines = emptyList()) }
     fun refreshMedia() = NodeBridge.send("get_media")
     fun refreshDeleted() = NodeBridge.send("get_deleted")
     fun clearError() = _state.update { it.copy(error = null) }

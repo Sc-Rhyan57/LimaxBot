@@ -17,8 +17,9 @@ android {
 
     signingConfigs {
         create("release") {
-            storeFile = file("keystore.jks")
-            storePassword = System.getenv("KEY_PASSWORD") ?: ""
+            val storeFilePath = System.getenv("STORE_FILE")
+            storeFile = if (!storeFilePath.isNullOrBlank()) file(storeFilePath) else null
+            storePassword = System.getenv("STORE_PASSWORD") ?: ""
             keyAlias = System.getenv("KEY_ALIAS") ?: ""
             keyPassword = System.getenv("KEY_PASSWORD") ?: ""
         }
@@ -62,7 +63,6 @@ android {
 
     sourceSets {
         getByName("main") {
-            // nodejs-project vai como asset; binário node vai em assets/bin/<abi>/
             assets.srcDirs("src/main/assets", "../../nodejs-assets")
         }
     }

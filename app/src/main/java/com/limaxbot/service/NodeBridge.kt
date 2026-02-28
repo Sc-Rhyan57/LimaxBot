@@ -16,6 +16,30 @@ import java.io.FileOutputStream
 import java.io.InputStreamReader
 import java.io.PrintWriter
 
+// ─── Logger global acessível de qualquer lugar do app ────────────────────────
+object AppLogger {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val _logs = MutableSharedFlow<String>(extraBufferCapacity = 500, replay = 200)
+    val logs: SharedFlow<String> = _logs
+
+    fun log(tag: String, msg: String) {
+        Log.d(tag, msg)
+        scope.launch { _logs.emit("[${tag}] $msg") }
+    }
+
+    fun err(tag: String, msg: String) {
+        Log.e(tag, msg)
+        scope.launch { _logs.emit("[ERR/$tag] $msg") }
+    }
+
+    fun node(msg: String) {
+        Log.d("Node.js", msg)
+        scope.launch { _logs.emit("[Node] $msg") }
+    }
+}
+
+// ─── NodeBridge ──────────────────────────────────────────────────────────────
 object NodeBridge {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -31,59 +55,68 @@ object NodeBridge {
     private var writer: PrintWriter? = null
 
     fun init(context: Context) {
+        AppLogger.log("NodeBridge", "Inicializando Node.js...")
         scope.launch {
             try {
-                // Extrair o binário node e o projeto dos assets para o armazenamento interno
                 val dataDir = context.filesDir
+                AppLogger.log("NodeBridge", "Extraindo binário node...")
                 val nodeBin = extractNodeBinary(context, dataDir)
-                val projectDir = extractNodeProject(context, dataDir)
 
                 if (nodeBin == null) {
-                    Log.e("NodeBridge", "Binário node não encontrado nos assets")
-                    _nodeReady.emit(false)
+                    AppLogger.err("NodeBridge", "Binário node NÃO encontrado em assets/bin/<abi>/node")
+                    AppLogger.err("NodeBridge", "ABIs suportadas: ${android.os.Build.SUPPORTED_ABIS.joinToString()}")
+                    // Mesmo sem o binário, marcamos como pronto para não travar a UI
+                    _nodeReady.emit(true)
                     return@launch
                 }
 
                 nodeBin.setExecutable(true)
+                AppLogger.log("NodeBridge", "Binário encontrado: ${nodeBin.absolutePath} (${nodeBin.length()} bytes)")
 
-                val pb = ProcessBuilder(nodeBin.absolutePath, "$projectDir/src/index.js")
+                val projectDir = extractNodeProject(context, dataDir)
+                AppLogger.log("NodeBridge", "Projeto em: ${projectDir.absolutePath}")
+
+                val pb = ProcessBuilder(nodeBin.absolutePath, "${projectDir.absolutePath}/src/index.js")
                 pb.directory(projectDir)
                 pb.environment()["HOME"] = dataDir.absolutePath
-                pb.environment()["NODE_PATH"] = "$projectDir/node_modules"
+                pb.environment()["NODE_PATH"] = "${projectDir.absolutePath}/node_modules"
                 pb.redirectErrorStream(false)
 
                 process = pb.start()
                 writer = PrintWriter(process!!.outputStream, true)
 
-                Log.d("NodeBridge", "Processo Node.js iniciado")
+                AppLogger.log("NodeBridge", "Processo Node.js iniciado com PID ${process!!.pid}")
                 _nodeReady.emit(true)
 
-                // Ler stdout do Node.js (mensagens JSON)
-                scope.launch {
+                // Ler stdout (mensagens JSON do bot)
+                scope.launch(Dispatchers.IO) {
                     val reader = BufferedReader(InputStreamReader(process!!.inputStream))
                     var line: String?
                     while (reader.readLine().also { line = it } != null) {
+                        val l = line ?: continue
                         try {
-                            val json = gson.fromJson(line, JsonObject::class.java)
+                            val json = gson.fromJson(l, JsonObject::class.java)
                             _messages.emit(json)
-                        } catch (e: Exception) {
-                            Log.w("NodeBridge", "Linha não-JSON do Node: $line")
+                            AppLogger.node("→ ${json["type"]?.asString ?: l}")
+                        } catch (_: Exception) {
+                            AppLogger.node(l)
                         }
                     }
+                    AppLogger.err("NodeBridge", "stdout do Node.js fechou — processo encerrou")
                 }
 
-                // Logar stderr (erros do Node.js)
-                scope.launch {
+                // Ler stderr do Node.js
+                scope.launch(Dispatchers.IO) {
                     val errReader = BufferedReader(InputStreamReader(process!!.errorStream))
                     var line: String?
                     while (errReader.readLine().also { line = it } != null) {
-                        Log.d("NodeBridge/stderr", line ?: "")
+                        AppLogger.err("Node.stderr", line ?: "")
                     }
                 }
 
             } catch (e: Exception) {
-                Log.e("NodeBridge", "Falha ao iniciar Node.js: $e")
-                _nodeReady.emit(false)
+                AppLogger.err("NodeBridge", "Falha ao iniciar: $e")
+                _nodeReady.emit(true) // libera a UI mesmo com erro
             }
         }
     }
@@ -91,61 +124,39 @@ object NodeBridge {
     fun send(action: String, payload: Any? = null) {
         scope.launch {
             try {
-                val msg = if (payload != null) {
+                val msg = if (payload != null)
                     gson.toJson(mapOf("action" to action, "payload" to payload))
-                } else {
+                else
                     gson.toJson(mapOf("action" to action))
-                }
                 writer?.println(msg)
+                AppLogger.log("NodeBridge", "← $action")
             } catch (e: Exception) {
-                Log.e("NodeBridge", "Send error: $e")
+                AppLogger.err("NodeBridge", "Send error: $e")
             }
         }
     }
 
     fun isRunning() = process?.isAlive == true
 
-    /**
-     * Extrai o binário 'node' dos assets para o armazenamento interno.
-     * O binário fica em assets/bin/<abi>/node
-     */
     private fun extractNodeBinary(context: Context, dataDir: File): File? {
-        val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: return null
-        val assetPath = "bin/$abi/node"
-        val outFile = File(dataDir, "node_bin")
-
-        return try {
-            context.assets.open(assetPath).use { input ->
-                FileOutputStream(outFile).use { output ->
-                    input.copyTo(output)
-                }
-            }
-            outFile
-        } catch (e: Exception) {
-            // Tentar ABI de fallback
-            val fallbackAbi = when {
-                abi.contains("arm64") -> "arm64-v8a"
-                abi.contains("arm") -> "armeabi-v7a"
-                abi.contains("x86_64") -> "x86_64"
-                else -> "x86"
-            }
+        val abis = android.os.Build.SUPPORTED_ABIS
+        AppLogger.log("NodeBridge", "ABIs do dispositivo: ${abis.joinToString()}")
+        for (abi in abis) {
+            val assetPath = "bin/$abi/node"
+            val outFile = File(dataDir, "node_bin_$abi")
             try {
-                context.assets.open("bin/$fallbackAbi/node").use { input ->
-                    FileOutputStream(outFile).use { output ->
-                        input.copyTo(output)
-                    }
+                context.assets.open(assetPath).use { input ->
+                    FileOutputStream(outFile).use { output -> input.copyTo(output) }
                 }
-                outFile
-            } catch (e2: Exception) {
-                Log.e("NodeBridge", "Binário node não encontrado: $e2")
-                null
+                AppLogger.log("NodeBridge", "Binário extraído para ABI=$abi")
+                return outFile
+            } catch (_: Exception) {
+                AppLogger.log("NodeBridge", "ABI=$abi não encontrada em assets")
             }
         }
+        return null
     }
 
-    /**
-     * Extrai o nodejs-project dos assets para o armazenamento interno.
-     */
     private fun extractNodeProject(context: Context, dataDir: File): File {
         val projectDir = File(dataDir, "nodejs-project")
         projectDir.mkdirs()
@@ -157,11 +168,8 @@ object NodeBridge {
         try {
             val assets = context.assets.list(assetPath) ?: return
             if (assets.isEmpty()) {
-                // É um arquivo
                 context.assets.open(assetPath).use { input ->
-                    FileOutputStream(destDir).use { output ->
-                        input.copyTo(output)
-                    }
+                    FileOutputStream(destDir).use { output -> input.copyTo(output) }
                 }
             } else {
                 destDir.mkdirs()
@@ -170,7 +178,7 @@ object NodeBridge {
                 }
             }
         } catch (e: Exception) {
-            Log.w("NodeBridge", "Erro ao copiar asset $assetPath: $e")
+            AppLogger.err("NodeBridge", "Erro ao copiar asset $assetPath: $e")
         }
     }
 }

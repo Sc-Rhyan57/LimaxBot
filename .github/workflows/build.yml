@@ -2,8 +2,15 @@ name: Build LimaxBot APK
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main, master]
+    inputs:
+      buildType:
+        description: 'Build Type'
+        required: true
+        default: 'debug'
+        type: choice
+        options:
+          - debug
+          - release
 
 permissions:
   contents: write
@@ -26,17 +33,19 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Setup Android NDK (para módulos nativos do nodejs-mobile)
+      - name: Setup Android NDK
         uses: nttld/setup-ndk@v1
         with:
           ndk-version: r26d
           link-to-sdk: true
 
-      - name: Instalar dependências do bot (node_modules que vão dentro do APK)
+      - name: Instalar dependências do bot
         run: |
           cd nodejs-assets/nodejs-project
           npm install --omit=dev
           echo "node_modules instalados: $(ls node_modules | wc -l) pacotes"
+
+      - uses: gradle/actions/setup-gradle@v3
 
       - name: Tornar gradlew executável
         run: chmod +x gradlew
@@ -50,24 +59,31 @@ jobs:
           key: gradle-${{ hashFiles('**/*.gradle*', '**/gradle-wrapper.properties') }}
           restore-keys: gradle-
 
-      - name: Build APK Debug
-        run: ./gradlew assembleDebug
+      - name: Decode Keystore
+        if: inputs.buildType == 'release'
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/keystore.jks
+
+      - name: Build APK
+        run: ./gradlew :app:assemble${{ inputs.buildType == 'release' && 'Release' || 'Debug' }}
         env:
           ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
-      - name: Upload APK como Artifact
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: LimaxBot-debug
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: LimaxBot-${{ inputs.buildType }}
+          path: app/build/outputs/apk/**/*.apk
           retention-days: 30
 
-      - name: Criar Release com o APK
+      - name: Criar Release
+        if: inputs.buildType == 'release'
         uses: softprops/action-gh-release@v1
         with:
           tag_name: v2.0.${{ github.run_number }}
           name: LimaxBot v2.0.${{ github.run_number }}
-          files: app/build/outputs/apk/debug/app-debug.apk
+          files: app/build/outputs/apk/release/*.apk
           draft: false
           prerelease: false
         env:

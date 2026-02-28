@@ -48,5 +48,6 @@ data class BotState(
     val contactResult: ContactInfo? = null,
     val error: String? = null,
     val connectedAt: Long? = null,
-    val nodeReady: Boolean = false
+    val nodeReady: Boolean = false,
+    val logLines: List<String> = emptyList()
 )

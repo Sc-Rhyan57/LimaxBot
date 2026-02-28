@@ -63,7 +63,7 @@ android {
 
     sourceSets {
         getByName("main") {
-            assets.srcDirs("src/main/assets", "../../nodejs-assets")
+            assets.srcDirs("src/main/assets", "../nodejs-assets")
         }
     }
 }

@@ -85,7 +85,7 @@ object NodeBridge {
                 process = pb.start()
                 writer = PrintWriter(process!!.outputStream, true)
 
-                AppLogger.log("NodeBridge", "Processo Node.js iniciado com PID ${process!!.pid}")
+                AppLogger.log("NodeBridge", "Processo Node.js iniciado com sucesso")
                 _nodeReady.emit(true)
 
                 // Ler stdout (mensagens JSON do bot)

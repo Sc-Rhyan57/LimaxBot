@@ -13,9 +13,6 @@ android {
         targetSdk = 34
         versionCode = 2
         versionName = "2.0.0"
-        ndk {
-            abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
-        }
     }
 
     signingConfigs {
@@ -65,8 +62,8 @@ android {
 
     sourceSets {
         getByName("main") {
+            // nodejs-project vai como asset; binário node vai em assets/bin/<abi>/
             assets.srcDirs("src/main/assets", "../../nodejs-assets")
-            jniLibs.srcDirs("src/main/jniLibs")
         }
     }
 }
@@ -85,12 +82,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.4")
     implementation("androidx.navigation:navigation-compose:2.7.7")
     implementation("androidx.datastore:datastore-preferences:1.1.1")
-
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-
     implementation("com.google.code.gson:gson:2.10.1")
     implementation("io.coil-kt:coil-compose:2.6.0")
-
-    // nodejs-mobile como módulo local (libnode.so injetada pelo CI via npm)
-    implementation(project(":nodejs-mobile-module"))
 }

@@ -41,24 +41,24 @@ jobs:
 
       - name: Instalar nodejs-mobile-react-native e extrair libnode.so
         run: |
-          # versão real disponível no npm (0.18.0 não existe)
           npm install nodejs-mobile-react-native@18.20.4
 
-          echo "=== Procurando jniLibs no pacote ==="
-          JNI_SRC=$(find node_modules/nodejs-mobile-react-native -type d -name "jniLibs" | head -1)
+          # Caminho real confirmado pelo log: android/libnode/bin/<abi>/libnode.so
+          LIBNODE_DIR="node_modules/nodejs-mobile-react-native/android/libnode/bin"
 
-          if [ -n "$JNI_SRC" ]; then
-            echo "Encontrado em: $JNI_SRC"
-            mkdir -p nodejs-mobile-module/src/main/jniLibs
-            cp -r "$JNI_SRC/." nodejs-mobile-module/src/main/jniLibs/
-            cp -r "$JNI_SRC/." app/src/main/jniLibs/
-            echo "SOs copiados:"
-            find nodejs-mobile-module/src/main/jniLibs -name "*.so"
-          else
-            echo "ERRO: jniLibs não encontrada!"
-            find node_modules/nodejs-mobile-react-native -name "*.so" | head -20
-            exit 1
-          fi
+          for ABI in armeabi-v7a arm64-v8a x86 x86_64; do
+            SRC="$LIBNODE_DIR/$ABI/libnode.so"
+            if [ -f "$SRC" ]; then
+              mkdir -p nodejs-mobile-module/src/main/jniLibs/$ABI
+              mkdir -p app/src/main/jniLibs/$ABI
+              cp "$SRC" nodejs-mobile-module/src/main/jniLibs/$ABI/libnode.so
+              cp "$SRC" app/src/main/jniLibs/$ABI/libnode.so
+              echo "Copiado: $ABI/libnode.so"
+            fi
+          done
+
+          echo "=== jniLibs prontos ==="
+          find app/src/main/jniLibs -name "*.so"
 
       - name: Instalar dependências do bot
         run: |

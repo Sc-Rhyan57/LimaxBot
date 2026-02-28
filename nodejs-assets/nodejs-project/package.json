@@ -1,0 +1,11 @@
+{
+  "name": "limax-bot",
+  "version": "2.0.0",
+  "main": "src/index.js",
+  "dependencies": {
+    "@whiskeysockets/baileys": "^6.7.18",
+    "pino": "^8.21.0",
+    "ws": "^8.18.0",
+    "@hapi/boom": "^10.0.1"
+  }
+}

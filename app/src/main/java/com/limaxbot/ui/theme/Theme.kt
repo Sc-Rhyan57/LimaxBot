@@ -25,6 +25,8 @@ object LC {
     val Error = Color(0xFFEF5350)
     val Info = Color(0xFF29B6F6)
     val Accent = Color(0xFF4CAF7D)
+    val Cyan = Color(0xFF00BCD4)
+    val Gold = Color(0xFFFFD700)
 }
 
 val LimaxColorScheme = darkColorScheme(
